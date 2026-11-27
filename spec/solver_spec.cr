@@ -381,4 +381,60 @@ describe Solver do
     expect_raises(UnknownConstraint) { solver.remove(cap, low) }
     solver.has?(cap).should be_true
   end
+
+  it "tightens the tolerance again after large constants leave" do
+    x = Variable.new("x")
+    solver = Solver.new
+    far = solver.add(x <= 1.0e7)
+    solver.add(x == 0)
+    solver.remove(far)
+    expect_raises(UnsatisfiableConstraint) { solver.add(x == 0.05) }
+  end
+
+  it "tightens the tolerance again after a large suggestion leaves" do
+    x = Variable.new("x")
+    solver = Solver.new
+    solver.add_edit(x, :strong)
+    solver.suggest(x, 1.0e7)
+    solver.remove_edit(x)
+    solver.add(x == 0)
+    expect_raises(UnsatisfiableConstraint) { solver.add(x == 0.05) }
+  end
+
+  it "explains a conflict along a long chain" do
+    xs = Array.new(100) { |i| Variable.new("x#{i}") }
+    solver = Solver.new
+    chain = (0...xs.size - 1).map { |i| solver.add(xs[i] + 1 <= xs[i + 1]) }
+    solver.add(xs[0] >= 0)
+    noise = (0...xs.size).map { |i| solver.add(xs[i] <= 10_000 + i) }
+    explained = solver.explain(xs[-1] <= 50)
+    explained.size.should eq(chain.size + 1)
+    chain.each { |c| explained.should contain(c) }
+    noise.each { |c| explained.should_not contain(c) }
+  end
+
+  it "lists the constraints in the order they were added" do
+    x = Variable.new("x")
+    y = Variable.new("y")
+    solver = Solver.new
+    first = solver.add(x >= 0)
+    second = solver.add((y == x).strength(:weak))
+    solver.add_edit(x, :strong)
+    solver.constraints.should eq([first, second])
+    solver.remove(first)
+    solver.constraints.should eq([second])
+  end
+
+  it "reads values without writing them into the variables" do
+    x = Variable.new("x")
+    other = Variable.new("other")
+    first = Solver.new
+    second = Solver.new
+    first.add(x == 3)
+    second.add(x == 8)
+    first[x].should eq(3.0)
+    second[x].should eq(8.0)
+    first[other].should eq(0.0)
+    x.value.should eq(0.0)
+  end
 end

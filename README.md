@@ -57,8 +57,9 @@ targets[width] = 250.0
 The solver keeps a variable only while a constraint or edit uses it, so a variable whose
 last constraint is removed is forgotten and costs nothing.
 
-Use each variable in one solver only: every solver that uses a variable writes its own
-solution into `Variable#value` on `#update`.
+Every solver that uses a variable writes its own solution into `Variable#value` on
+`#update`. To share a variable between solvers, read each solver's value with
+`solver[variable]` instead of calling `#update`.
 
 ### Expressions
 
@@ -82,6 +83,8 @@ A comparison returns a required `Constraint`. `Constraint#strength` returns a co
 another strength:
 
 ```crystal
+x = Cassowary::Variable.new("x")
+y = Cassowary::Variable.new("y")
 (x + 10 <= y).strength(:medium)
 (x == 0).strength(Cassowary::Strength.new(0, 5, 0))
 ```
@@ -125,6 +128,7 @@ multiplied by the component.
 | `remove(constraint)`                              | removes a constraint                                                               |
 | `remove(*constraints)` / `remove(constraints)`    | removes several constraints; checks all are present before removing any            |
 | `has?(constraint)`                                | whether the constraint is in the solver                                            |
+| `constraints`                                     | the added constraints, in the order they were added                                |
 | `explain(constraint)`                             | a minimal set of required constraints a rejected constraint conflicts with         |
 | `add_edit(variable, strength = :strong)`          | makes a variable steerable by `suggest`                                            |
 | `remove_edit(variable)`                           | stops a variable from being an edit variable                                       |
@@ -133,6 +137,7 @@ multiplied by the component.
 | `suggest(variable, value)`                        | suggests a value for an edit variable                                              |
 | `suggest(values)`                                 | suggests values for several edit variables at once, from `{variable, value}` pairs |
 | `update`                                          | writes the solution into the variables                                             |
+| `[](variable)`                                    | the variable's value in the solution, without writing it into the variable         |
 | `update { \|variable\| }`                         | writes the solution and yields each variable whose value changed                   |
 | `reset`                                           | removes every constraint and edit variable                                         |
 | `dump` / `dump(io)`                               | describes the internal state, for debugging                                        |
@@ -154,7 +159,7 @@ All errors inherit from `Cassowary::Error`.
 ## Development
 
 ```sh
-make spec          # run the specs; FUZZ_SEEDS=200 make spec fuzzes deeper
+make spec          # run the specs, including the README examples; FUZZ_SEEDS=200 make spec fuzzes deeper
 make bench         # run the benchmarks
 make bench-cycles  # count CPU cycles per benchmark scenario (needs perf)
 make docs          # generate the API docs

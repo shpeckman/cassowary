@@ -3,29 +3,24 @@
 # A tableau row: `basic = constant + Σ coefficient * symbol`. `T` is `Float64` for the
 # tableau and `Cost` for the objective, which weighs every strength level separately.
 #
-# Cells live in two parallel buffers sorted by symbol. Adding a long row merges both
-# sorted lists into a spare pair of buffers, which then swaps with the live pair, so
-# merging stops allocating once the buffers have grown. Adding a row that is much shorter
-# than this one updates the cells in place through binary search instead, so the long row
-# is not copied.
+# Cells live in two parallel buffers sorted by symbol. Adding a row merges it in place
+# from the back, so cells before the first changed symbol never move and the merge needs
+# no second buffer.
 #
 # The block overloads of `#insert` and `#substitute` yield every symbol that enters
 # (`true`) or leaves (`false`) the row; the solver uses them to keep its column index.
 private class Cassowary::Row(T)
   private NEAR_ZERO = 1.0e-8
 
-  # Below this ratio of row lengths, `#insert(row)` updates cells in place instead of
-  # merging.
-  private IN_PLACE_RATIO = 8
+  # When the cells a merge may move outnumber the incoming cells by more than this
+  # ratio, the merge moves runs of cells through `memmove` instead of cell by cell.
+  private RUN_RATIO = 8
 
   getter constant : T
   getter size = 0
   protected getter symbols = Pointer(Sym).null
   protected getter coefficients = Pointer(T).null
   @capacity = 0
-  @spare_symbols = Pointer(Sym).null
-  @spare_coefficients = Pointer(T).null
-  @spare_capacity = 0
 
   def initialize(@constant : T)
   end
@@ -151,18 +146,7 @@ private class Cassowary::Row(T)
   # Adds *row* times *coefficient*.
   def insert(row : Row(Float64), coefficient : T, & : Sym, Bool ->) : Nil
     @constant += coefficient * row.constant
-    other_size = row.size
-    return if other_size == 0
-
-    if other_size * IN_PLACE_RATIO < @size
-      other_symbols = row.symbols
-      other_coefficients = row.coefficients
-      other_size.times do |j|
-        insert(other_symbols[j], coefficient * other_coefficients[j]) { |s, entered| yield s, entered }
-      end
-    else
-      merge(row, coefficient) { |s, entered| yield s, entered }
-    end
+    merge(row, coefficient, -1) { |s, entered| yield s, entered }
   end
 
   def remove(symbol : Sym) : Nil
@@ -200,9 +184,9 @@ private class Cassowary::Row(T)
     i = search(symbol)
     return if i < 0
     coefficient = @coefficients[i]
-    delete_at(i)
     yield symbol, false
-    insert(row, coefficient) { |s, entered| yield s, entered }
+    @constant += coefficient * row.constant
+    merge(row, coefficient, i) { |s, entered| yield s, entered }
   end
 
   # Yields every symbol in exactly one of this row and *other*, with `true` when it is in
@@ -230,57 +214,129 @@ private class Cassowary::Row(T)
     each { |symbol, coefficient| io << " + " << coefficient << " * " << symbol }
   end
 
-  # Merges both sorted cell lists into the spare buffers and swaps them in.
-  private def merge(row : Row(Float64), coefficient : T, & : Sym, Bool ->) : Nil
+  # Adds the cells of *row* times *coefficient* and drops the cell at index *skip*
+  # (none if negative).
+  #
+  # Merges from the back into room reserved past the end until *row* runs out; cells
+  # before that keep their place, and the merged tail moves down to follow them.
+  private def merge(row : Row(Float64), coefficient : T, skip : Int32, & : Sym, Bool ->) : Nil
     other_symbols = row.symbols
     other_coefficients = row.coefficients
     other_size = row.size
-    needed = @size + other_size
-    if @spare_capacity < needed
-      @spare_capacity = Math.max(needed, @spare_capacity * 2)
-      @spare_symbols = Row.grow(@spare_symbols, @spare_capacity)
-      @spare_coefficients = Row.grow(@spare_coefficients, @spare_capacity)
+    if other_size == 0
+      delete_at(skip) if skip >= 0
+      return
     end
-    symbols = @spare_symbols
-    coefficients = @spare_coefficients
-    i = j = n = 0
-    size = @size
 
-    while i < size || j < other_size
-      if j == other_size || (i < size && @symbols[i].bits < other_symbols[j].bits)
-        symbols[n] = @symbols[i]
-        coefficients[n] = @coefficients[i]
-        n += 1
-        i += 1
-      elsif i == size || other_symbols[j].bits < @symbols[i].bits
-        symbol = other_symbols[j]
-        value = coefficient * other_coefficients[j]
-        unless Row.near_zero?(value)
-          symbols[n] = symbol
-          coefficients[n] = value
-          n += 1
-          yield symbol, true
+    first = search(other_symbols[0])
+    first = ~first if first < 0
+    first = skip if skip >= 0 && skip < first
+    runs = @size - first > RUN_RATIO * other_size
+    reserve(@size + other_size)
+    symbols = @symbols
+    coefficients = @coefficients
+    i = @size - 1
+    j = other_size - 1
+    w = @size + other_size - 1
+
+    while j >= 0
+      bits = other_symbols[j].bits
+      if runs
+        # Moves the run of cells above this symbol in one go, leaving out *skip*.
+        at_most = last_at_most(bits, first, i)
+        if i > at_most
+          if at_most < skip <= i
+            w = move_run(skip + 1, i, w)
+            w = move_run(at_most + 1, skip - 1, w)
+          else
+            w = move_run(at_most + 1, i, w)
+          end
+          i = at_most
         end
-        j += 1
       else
-        symbol = @symbols[i]
-        value = @coefficients[i] + coefficient * other_coefficients[j]
+        while i >= first && symbols[i].bits > bits
+          unless i == skip
+            symbols[w] = symbols[i]
+            coefficients[w] = coefficients[i]
+            w -= 1
+          end
+          i -= 1
+        end
+      end
+
+      if i >= first && symbols[i].bits == bits
+        symbol = symbols[i]
+        value = coefficients[i] + coefficient * other_coefficients[j]
         if Row.near_zero?(value)
           yield symbol, false
         else
-          symbols[n] = symbol
-          coefficients[n] = value
-          n += 1
+          symbols[w] = symbol
+          coefficients[w] = value
+          w -= 1
         end
-        i += 1
-        j += 1
+        i -= 1
+      else
+        symbol = other_symbols[j]
+        value = coefficient * other_coefficients[j]
+        unless Row.near_zero?(value)
+          symbols[w] = symbol
+          coefficients[w] = value
+          w -= 1
+          yield symbol, true
+        end
+      end
+      j -= 1
+    end
+    # Cells up to *i* keep their place; close the gap behind them.
+    kept = i + 1
+    if first <= skip <= i
+      tail = i - skip
+      (symbols + skip + 1).move_to(symbols + skip, tail)
+      (coefficients + skip + 1).move_to(coefficients + skip, tail)
+      kept = i
+    end
+    merged = @size + other_size - 1 - w
+    if w + 1 > kept
+      (symbols + w + 1).move_to(symbols + kept, merged)
+      (coefficients + w + 1).move_to(coefficients + kept, merged)
+    end
+    @size = kept + merged
+  end
+
+  # Returns the last index in `low..high` whose symbol bits are at most *bits*, or
+  # `low - 1`. Gallops down from *high*, so a short run above *bits* costs a few probes.
+  private def last_at_most(bits : UInt32, low : Int32, high : Int32) : Int32
+    step = 1
+    top = high
+    while top >= low && @symbols[top].bits > bits
+      high = top - 1
+      top -= step
+      step <<= 1
+    end
+    return high if top >= low && top == high
+    low = Math.max(low, top + 1)
+    result = low - 1
+    while low <= high
+      mid = (low + high) >> 1
+      if @symbols[mid].bits <= bits
+        result = mid
+        low = mid + 1
+      else
+        high = mid - 1
       end
     end
+    result
+  end
 
-    @spare_symbols, @symbols = @symbols, symbols
-    @spare_coefficients, @coefficients = @coefficients, coefficients
-    @spare_capacity, @capacity = @capacity, @spare_capacity
-    @size = n
+  # Moves the cells `from..to` so the last one lands at *w*, and returns the index below
+  # the moved block.
+  private def move_run(from : Int32, to : Int32, w : Int32) : Int32
+    count = to - from + 1
+    return w if count <= 0
+    w -= count
+    (@symbols + from).move_to(@symbols + w + 1, count)
+    (@coefficients + from).move_to(@coefficients + w + 1, count)
+    w
   end
 
   # Returns the index of *symbol*, or the bitwise complement of its insertion point.

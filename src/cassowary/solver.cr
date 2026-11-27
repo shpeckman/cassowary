@@ -167,6 +167,7 @@ class Cassowary::Solver
     drop_symbol(tag.other) unless tag.other.invalid?
     each_variable(constraint) { |variable| release(variable) }
     @dirty = true
+    shrink_scale if constraint.expression.constant.abs >= @scale
   end
 
   # Removes every constraint of *constraints*.
@@ -188,8 +189,9 @@ class Cassowary::Solver
   # conflicts with: removing any one of them lets *constraint* be added.
   #
   # The set is empty when *constraint* can be added or contradicts itself on its own.
-  # Leaves the solver unchanged; it costs several solves on scratch solvers, so call it
-  # to diagnose a rejection.
+  # Leaves the solver unchanged. It costs one trial solve per constraint involved in the
+  # conflict, so call it to diagnose a rejection: a few hundred constraints take well
+  # under a second, a conflict through a thousand takes seconds.
   def explain(constraint : Constraint) : Array(Constraint)
     return [] of Constraint if @cns.has_key?(constraint) || !constraint.strength.required?
 
@@ -197,17 +199,39 @@ class Cassowary::Solver
     candidates = conflicts_with(required, constraint) || return [] of Constraint
     candidates = required unless conflicts_with(candidates, constraint)
 
-    kept = candidates.dup
-    candidates.each do |candidate|
-      trial = kept.reject(&.same?(candidate))
-      kept = trial if conflicts_with(trial, constraint)
+    scratch = Solver.new
+    scratch.add(candidates)
+    candidates.select do |candidate|
+      scratch.remove(candidate)
+      begin
+        scratch.add(constraint)
+      rescue UnsatisfiableConstraint
+        next false
+      end
+      scratch.remove(constraint)
+      scratch.add(candidate)
+      true
     end
-    kept
   end
 
   # Returns whether *constraint* is in the solver.
   def has?(constraint : Constraint) : Bool
     @cns.has_key?(constraint)
+  end
+
+  # Returns the constraints added with `#add`, in the order they were added.
+  def constraints : Array(Constraint)
+    edits = @edits.each_value.map(&.constraint).to_set
+    @cns.keys.reject { |constraint| edits.includes?(constraint) }
+  end
+
+  # Returns the value the solver assigns *variable*, without writing it into the
+  # variable; zero for a variable no constraint uses.
+  #
+  # Unlike `#update`, this lets several solvers share a variable.
+  def [](variable : Variable) : Float64
+    optimize_objective
+    value_of(@vars[variable.object_id]?.try(&.symbol))
   end
 
   # Makes *variable* an edit variable with *strength*, so `#suggest` can steer it.
@@ -231,6 +255,7 @@ class Cassowary::Solver
     info = edit_info(variable)
     remove(info.constraint)
     @edits.delete(variable.object_id)
+    shrink_scale if info.constant.abs >= @scale
   end
 
   # Returns whether *variable* is an edit variable.
@@ -295,7 +320,7 @@ class Cassowary::Solver
   def update(& : Variable ->) : Nil
     optimize_objective
     @vars.each_value do |info|
-      value = (@rows[info.symbol.id].try(&.constant) || 0.0) + 0.0 # normalizes -0.0
+      value = value_of(info.symbol)
       variable = info.variable
       next if value == variable.value
       variable.value = value
@@ -701,6 +726,19 @@ class Cassowary::Solver
     nil
   rescue error : UnsatisfiableConstraint
     error.conflicts
+  end
+
+  # Recomputes the scale from the constants still in the solver, after the largest one
+  # left.
+  private def shrink_scale : Nil
+    @scale = 1.0
+    @cns.each_key { |constraint| grow_scale(constraint.expression.constant) }
+    @edits.each_value { |info| grow_scale(info.constant) }
+  end
+
+  private def value_of(symbol : Sym?) : Float64
+    return 0.0 unless symbol
+    (@rows[symbol.id].try(&.constant) || 0.0) + 0.0 # normalizes -0.0
   end
 
   private def grow_scale(constant : Float64) : Nil
