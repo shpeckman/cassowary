@@ -186,7 +186,8 @@ class Cassowary::Solver
   end
 
   # Returns a minimal set of required constraints in the solver that *constraint*
-  # conflicts with: removing any one of them lets *constraint* be added.
+  # conflicts with: together they reject it, and without any one of them they accept
+  # it. Other required constraints may conflict with it as well.
   #
   # The set is empty when *constraint* can be added or contradicts itself on its own.
   # Leaves the solver unchanged. It costs one trial solve per constraint involved in the

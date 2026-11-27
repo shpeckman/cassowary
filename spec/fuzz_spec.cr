@@ -50,6 +50,20 @@ private def check_optimal(solver : Solver, random : Random, required : Array(Con
   solver.update
 end
 
+# Checks that *explained* is a minimal conflict for *rejected* among *required*: the set
+# alone rejects it, and without any one of its constraints it is accepted.
+private def check_explained(explained : Array(Constraint), rejected : Constraint, required : Array(Constraint)) : Nil
+  explained.should_not be_empty
+  explained.each { |c| required.any?(&.same?(c)).should be_true }
+  copy = ->(c : Constraint) { Constraint.new(c.expression, c.operator, c.strength) }
+  expect_raises(UnsatisfiableConstraint) { Solver.new.add(explained.map(&copy) << copy.call(rejected)) }
+  explained.each do |left_out|
+    trial = Solver.new
+    trial.add(explained.reject(&.same?(left_out)).map(&copy))
+    trial.add(copy.call(rejected))
+  end
+end
+
 # Number of seeds to fuzz; set FUZZ_SEEDS for a deeper run.
 private FUZZ_SEEDS = (ENV["FUZZ_SEEDS"]? || "10").to_i
 
@@ -106,6 +120,8 @@ describe "Solver fuzzing" do
             expect_raises(UnsatisfiableConstraint) { solver.add(bad) }
             solver.has?(bad).should be_false
             solver.@cns.size.should eq(size)
+            check_explained(solver.explain(bad), bad, required)
+            solver.@cns.size.should eq(size)
           when 6
             constraint = required.size > 16 ? required.delete_at(random.rand(16...required.size)) : nil
             solver.remove(constraint) if constraint
@@ -126,6 +142,10 @@ describe "Solver fuzzing" do
           end
 
           solver.update
+          variables.each { |v| solver[v].should eq(v.value) }
+          listed = solver.constraints
+          listed.size.should eq(required.size + optional.size)
+          (required + optional).each { |c| listed.any?(&.same?(c)).should be_true }
           # Rounding grows with the largest coordinate, not with each constraint's own terms.
           required.each { |c| (c.violated? && c.expression.value.abs > 1.0e-12 * bound).should be_false }
           check_column_index(solver)

@@ -4,6 +4,8 @@ An incremental linear constraint solver for Crystal, based on the Cassowary algo
 Build constraints with ordinary operators, give them strengths, and steer edit variables
 for interactive layout.
 
+API documentation: https://shpeckman.github.io/cassowary/
+
 ## Installation
 
 Add the dependency to your `shard.yml`:
