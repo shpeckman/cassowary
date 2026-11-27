@@ -64,7 +64,7 @@ class Cassowary::Solver
   # Indexed by symbol id; id 0 is `Sym::INVALID`.
   @symbols : Array(Sym) = [Sym::INVALID] of Sym
   @rows = [nil] of Row(Float64)?
-  @columns = [nil] of Set(Sym)?
+  @columns = [nil] of SymSet?
   @markers = [nil] of Constraint?
   @free_ids = [] of UInt32
 
@@ -98,6 +98,7 @@ class Cassowary::Solver
         subject = tag.marker
       else
         conflicts = conflicts_in(row)
+        recycle(row)
       end
     end
 
@@ -247,7 +248,7 @@ class Cassowary::Solver
     @edits.clear
     @symbols = [Sym::INVALID] of Sym
     @rows = [nil] of Row(Float64)?
-    @columns = [nil] of Set(Sym)?
+    @columns = [nil] of SymSet?
     @markers = [nil] of Constraint?
     @free_ids.clear
     @infeasible.clear
@@ -344,7 +345,7 @@ class Cassowary::Solver
 
   # Removes *symbol* from the tableau and the objective, fixing it at zero, and frees it.
   private def drop_symbol(symbol : Sym) : Nil
-    take_row(symbol)
+    take_row(symbol).try { |row| recycle(row) }
     remove_column(symbol)
     free_symbol(symbol)
   end
@@ -429,8 +430,8 @@ class Cassowary::Solver
     basics.clear
   end
 
-  private def column(symbol : Sym) : Set(Sym)
-    @columns[symbol.id] ||= Set(Sym).new
+  private def column(symbol : Sym) : SymSet
+    @columns[symbol.id] ||= SymSet.new
   end
 
   private def unindex(symbol : Sym, basic : Sym) : Nil
@@ -441,7 +442,8 @@ class Cassowary::Solver
   private def create_row(constraint : Constraint) : {Tag, Row(Float64)}
     expression = constraint.expression
     strength = constraint.strength
-    row = Row(Float64).new(expression.constant)
+    row = spare_row
+    row.clear(expression.constant)
 
     expression.terms.each do |term|
       next if Row.near_zero?(term.coefficient)
@@ -530,8 +532,8 @@ class Cassowary::Solver
   private def add_with_artificial_variable(row : Row(Float64)) : Array(Constraint)?
     begin_journal
     artificial_symbol = new_symbol(:slack)
-    put_row(artificial_symbol, row.copy)
-    artificial = row.copy
+    put_row(artificial_symbol, row)
+    artificial = spare_row.copy_from(row)
     @artificial = artificial
     optimize(artificial)
     @artificial = nil
@@ -539,12 +541,13 @@ class Cassowary::Solver
     if Row.near_zero?(artificial.constant) && pivot_out_artificial(artificial_symbol)
       commit
       drop_symbol(artificial_symbol)
-      nil
+      conflicts = nil
     else
       conflicts = conflicts_in(artificial)
       rollback
-      conflicts
     end
+    recycle(artificial)
+    conflicts
   end
 
   # Makes *artificial_symbol* parametric so it can be dropped. Returns false if its row
@@ -636,11 +639,15 @@ class Cassowary::Solver
   # Eliminates *marker* from the tableau, dropping the one row that defines it.
   # Returns false if no row holds *marker*.
   private def remove_symbol(marker : Sym) : Bool
-    return true if take_row(marker)
+    if row = take_row(marker)
+      recycle(row)
+      return true
+    end
     leaving = marker_leaving_symbol(marker) || return false
     row = take_row(leaving).not_nil!
     row.solve_for(leaving, marker)
     substitute(marker, row)
+    recycle(row)
     true
   end
 
