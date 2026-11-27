@@ -1,0 +1,17 @@
+# shard.yml
+name: cassowary
+version: 0.1.0
+
+authors:
+  - shpeckman
+
+description: |
+  An incremental linear constraint solver for Crystal, based on the Cassowary
+  algorithm. Build constraints with ordinary operators, give them strengths,
+  and steer edit variables for interactive layout.
+
+repository: "https://github.com/shpeckman/cassowary"
+
+crystal: ">= 1.21"
+
+license: MIT
