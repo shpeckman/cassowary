@@ -88,6 +88,10 @@ returned constraint to remove it later.
 
 `Constraint#violated?` reports whether the constraint fails for the variables' current
 values, which is useful after `Solver#update` to see which optional constraints gave way.
+It ignores differences below 1e-8 of the constraint's largest term or constant. The
+solver's own tolerance scales with the largest constant it has been given, so
+coordinates far from 1 (1e4, 1e7) solve as reliably as small ones; rounding then grows
+with that magnitude, so a constraint near zero can report a tiny violation.
 
 ### Strengths
 
@@ -111,6 +115,7 @@ multiplied by the component.
 | `add(constraint)`                                 | adds a constraint and returns it                                                   |
 | `remove(constraint)`                              | removes a constraint                                                               |
 | `has?(constraint)`                                | whether the constraint is in the solver                                            |
+| `explain(constraint)`                             | a minimal set of required constraints a rejected constraint conflicts with         |
 | `add_edit(variable, strength = :strong)`          | makes a variable steerable by `suggest`                                            |
 | `remove_edit(variable)`                           | stops a variable from being an edit variable                                       |
 | `has_edit?(variable)`                             | whether the variable is an edit variable                                           |
@@ -129,7 +134,7 @@ All errors inherit from `Cassowary::Error`.
 | Error                     | Raised by                | When                                                                                                            |
 |---------------------------|--------------------------|-----------------------------------------------------------------------------------------------------------------|
 | `DuplicateConstraint`     | `add`                    | the constraint is already in the solver                                                                         |
-| `UnsatisfiableConstraint` | `add`                    | a required constraint conflicts; solver unchanged; `conflicts` lists the required constraints it conflicts with |
+| `UnsatisfiableConstraint` | `add`                    | a required constraint conflicts; solver unchanged; `conflicts` lists required constraints it conflicts with, possibly more than needed; `Solver#explain` gives a minimal set |
 | `UnknownConstraint`       | `remove`                 | the constraint is not in the solver                                                                             |
 | `DuplicateEdit`           | `add_edit`               | the variable is already an edit variable                                                                        |
 | `BadRequiredStrength`     | `add_edit`               | the edit strength is required                                                                                   |

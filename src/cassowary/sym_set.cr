@@ -41,7 +41,7 @@ private class Cassowary::SymSet
         return self
       end
       rehash(LINEAR_LIMIT * 4)
-    elsif (@size + 1) * 2 > @capacity
+    elsif (@size + 1) * 4 > @capacity * 3
       rehash(@capacity * 2)
     end
     @size += 1 if place(symbol)

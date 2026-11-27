@@ -19,8 +19,8 @@ end
 class Cassowary::UnsatisfiableConstraint < Cassowary::Error
   getter constraint : Constraint
 
-  # Returns the required constraints already in the solver that `#constraint` conflicts
-  # with.
+  # Returns required constraints already in the solver that `#constraint` conflicts
+  # with. The set may hold more than needed; `Solver#explain` returns a minimal one.
   getter conflicts : Array(Constraint)
 
   def initialize(@constraint : Constraint, @conflicts : Array(Constraint) = [] of Constraint)

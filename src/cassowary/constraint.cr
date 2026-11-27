@@ -17,6 +17,9 @@ class Cassowary::Constraint
     Equal
   end
 
+  # Relative tolerance of `#violated?`, against the largest term or constant.
+  private VIOLATION_EPSILON = 1.0e-8
+
   getter expression : Expression
   getter operator : Operator
   getter strength : Strength
@@ -36,7 +39,10 @@ class Cassowary::Constraint
   # its strength.
   def violated? : Bool
     value = @expression.value
-    return false if Row.near_zero?(value)
+    magnitude = @expression.terms.reduce(Math.max(1.0, @expression.constant.abs)) do |largest, term|
+      Math.max(largest, term.value.abs)
+    end
+    return false if value.abs < VIOLATION_EPSILON * magnitude
     case @operator
     in .less_equal?    then value > 0.0
     in .greater_equal? then value < 0.0

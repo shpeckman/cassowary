@@ -54,10 +54,16 @@ class Cassowary::Solver
   # Relative size below which an objective coefficient counts as rounding residue.
   private RESIDUE = 1.0e-12
 
+  # Relative tolerance for row constants: a constant counts as zero below this times the
+  # largest magnitude the solver has been given.
+  private CONSTANT_EPSILON = 1.0e-8
+
   # Rows kept for reuse by the rollback journal.
   private SPARE_ROWS = 256
 
   @cns = Hash(Constraint, Tag).new
+  # Largest constant magnitude added or suggested, at least 1; scales `negligible?`.
+  @scale = 1.0
   @vars = Hash(UInt64, VarInfo).new
   @edits = Hash(UInt64, EditInfo).new
 
@@ -89,12 +95,13 @@ class Cassowary::Solver
   def add(constraint : Constraint) : Constraint
     raise DuplicateConstraint.new(constraint) if @cns.has_key?(constraint)
 
+    grow_scale(constraint.expression.constant)
     tag, row = create_row(constraint)
     subject = choose_subject(row, tag)
     conflicts = nil
 
     if subject.invalid? && row.all_symbols?(&.dummy?)
-      if Row.near_zero?(row.constant)
+      if negligible?(row.constant)
         subject = tag.marker
       else
         conflicts = conflicts_in(row)
@@ -141,6 +148,27 @@ class Cassowary::Solver
     drop_symbol(tag.other) unless tag.other.invalid?
     each_variable(constraint) { |variable| release(variable) }
     @dirty = true
+  end
+
+  # Returns a minimal set of required constraints in the solver that *constraint*
+  # conflicts with: removing any one of them lets *constraint* be added.
+  #
+  # The set is empty when *constraint* can be added or contradicts itself on its own.
+  # Leaves the solver unchanged; it costs several solves on scratch solvers, so call it
+  # to diagnose a rejection.
+  def explain(constraint : Constraint) : Array(Constraint)
+    return [] of Constraint if @cns.has_key?(constraint) || !constraint.strength.required?
+
+    required = @cns.keys.select(&.strength.required?)
+    candidates = conflicts_with(required, constraint) || return [] of Constraint
+    candidates = required unless conflicts_with(candidates, constraint)
+
+    kept = candidates.dup
+    candidates.each do |candidate|
+      trial = kept.reject(&.same?(candidate))
+      kept = trial if conflicts_with(trial, constraint)
+    end
+    kept
   end
 
   # Returns whether *constraint* is in the solver.
@@ -255,6 +283,7 @@ class Cassowary::Solver
     @objective = Row(Cost).new(Cost::ZERO)
     @artificial = nil
     @dirty = false
+    @scale = 1.0
     @journaled = [false]
   end
 
@@ -288,6 +317,7 @@ class Cassowary::Solver
 
   # Moves the edit constant of *variable* to *value*, queueing rows that turn infeasible.
   private def shift(variable : Variable, info : EditInfo, value : Float64) : Nil
+    grow_scale(value)
     delta = value - info.constant
     @edits[variable.object_id] = info.with_constant(value)
     marker = info.tag.marker
@@ -538,7 +568,7 @@ class Cassowary::Solver
     optimize(artificial)
     @artificial = nil
 
-    if Row.near_zero?(artificial.constant) && pivot_out_artificial(artificial_symbol)
+    if negligible?(artificial.constant) && pivot_out_artificial(artificial_symbol)
       commit
       drop_symbol(artificial_symbol)
       conflicts = nil
@@ -628,6 +658,26 @@ class Cassowary::Solver
     @created.clear
   end
 
+  # Adds *constraints* and then *constraint* to a scratch solver. Returns the conflicts it
+  # reports, or nil when *constraint* fits.
+  private def conflicts_with(constraints : Array(Constraint), constraint : Constraint) : Array(Constraint)?
+    scratch = Solver.new
+    constraints.each { |c| scratch.add(c) }
+    scratch.add(constraint)
+    nil
+  rescue error : UnsatisfiableConstraint
+    error.conflicts
+  end
+
+  private def grow_scale(constant : Float64) : Nil
+    magnitude = constant.abs
+    @scale = magnitude if magnitude > @scale
+  end
+
+  private def negligible?(constant : Float64) : Bool
+    constant.abs < CONSTANT_EPSILON * @scale
+  end
+
   private def spare_row : Row(Float64)
     @spare_rows.pop? || Row(Float64).new(0.0)
   end
@@ -661,7 +711,7 @@ class Cassowary::Solver
           next if s == symbol
           entered ? column(s) << basic : unindex(s, basic)
         end
-        @infeasible << basic if !basic.external? && r.constant < 0.0 && !Row.near_zero?(r.constant)
+        @infeasible << basic if !basic.external? && r.constant < 0.0 && !negligible?(r.constant)
       end
       basics.clear
     end
@@ -701,10 +751,34 @@ class Cassowary::Solver
 
   # Restores feasibility with the dual simplex method. Returns the basic symbol of a row
   # that cannot be made feasible, or nil on success.
+  # Removes and returns the queued basic whose row has the most negative constant,
+  # dropping queued rows that became feasible.
+  private def most_infeasible : Sym?
+    best = nil
+    best_constant = 0.0
+    i = 0
+    while i < @infeasible.size
+      basic = @infeasible.unsafe_fetch(i)
+      row = @rows[basic.id]
+      if row && row.constant < 0.0 && !negligible?(row.constant)
+        if best.nil? || row.constant < best_constant
+          best = i
+          best_constant = row.constant
+        end
+        i += 1
+      else
+        @infeasible.swap(i, -1)
+        @infeasible.pop
+      end
+    end
+    return unless best
+    @infeasible.swap(best, -1)
+    @infeasible.pop
+  end
+
   private def dual_optimize : Sym?
-    while leaving = @infeasible.pop?
-      row = @rows[leaving.id]
-      next unless row && row.constant < 0.0 && !Row.near_zero?(row.constant)
+    while leaving = most_infeasible
+      row = row_of(leaving)
 
       entering = Sym::INVALID
       best = Cost::ZERO

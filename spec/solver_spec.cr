@@ -309,4 +309,50 @@ describe Solver do
     end
     solver.@symbols.size.should eq(3)
   end
+
+  it "forgets edit variables on reset and accepts them again" do
+    x = Variable.new("x")
+    solver = Solver.new
+    solver.add(x >= 0)
+    solver.add_edit(x, :strong)
+    solver.suggest(x, 40)
+    solver.reset
+
+    expect_raises(UnknownEdit) { solver.suggest(x, 10) }
+    expect_raises(UnknownEdit) { solver.remove_edit(x) }
+
+    solver.add(x <= 100)
+    solver.add_edit(x, :strong)
+    solver.suggest(x, 120)
+    solver.update
+    x.value.should eq(100.0)
+    solver.suggest(x, 30)
+    solver.update
+    x.value.should eq(30.0)
+  end
+
+  it "explains a rejection with a minimal set of conflicting constraints" do
+    x = Variable.new("x")
+    y = Variable.new("y")
+    z = Variable.new("z")
+    solver = Solver.new
+    solver.add(x >= 0)
+    solver.add(z <= 50)
+    xy = solver.add(x + 10 <= y)
+    yz = solver.add(y + 10 <= z)
+    cap = solver.add(z <= 40)
+    solver.add((x == 30).strength(:strong))
+
+    explained = solver.explain(x >= 25)
+    explained.size.should eq(3)
+    explained.should contain(xy)
+    explained.should contain(yz)
+    explained.should contain(cap)
+    solver.explain(x >= 15).should be_empty
+    solver.explain((x >= 25).strength(:strong)).should be_empty
+    solver.explain(x - x == 1).should be_empty
+    solver.has?(x >= 25).should be_false
+    solver.update
+    x.value.should eq(20.0)
+  end
 end
