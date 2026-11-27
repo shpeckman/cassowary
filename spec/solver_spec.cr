@@ -409,8 +409,8 @@ describe Solver do
     noise = (0...xs.size).map { |i| solver.add(xs[i] <= 10_000 + i) }
     explained = solver.explain(xs[-1] <= 50)
     explained.size.should eq(chain.size + 1)
-    chain.each { |c| explained.should contain(c) }
-    noise.each { |c| explained.should_not contain(c) }
+    chain.each { |constraint| explained.should contain(constraint) }
+    noise.each { |constraint| explained.should_not contain(constraint) }
   end
 
   it "lists the constraints in the order they were added" do

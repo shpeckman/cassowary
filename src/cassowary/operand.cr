@@ -50,14 +50,14 @@ module Cassowary::Operand
     scaled(-1.0)
   end
 
-  # Returns this operand multiplied by *factor*.
-  def *(factor : Number) : Expression
-    scaled(factor.to_f64)
+  # Returns this operand multiplied by *other*.
+  def *(other : Number) : Expression
+    scaled(other.to_f64)
   end
 
-  # Returns this operand divided by *divisor*.
-  def /(divisor : Number) : Expression
-    scaled(1.0 / divisor.to_f64)
+  # Returns this operand divided by *other*.
+  def /(other : Number) : Expression
+    scaled(1.0 / other.to_f64)
   end
 
   # Returns a required constraint that this operand equals *other*.

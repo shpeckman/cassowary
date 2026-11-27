@@ -16,8 +16,8 @@ private struct Cassowary::Cost
     Cost.new(@strong + other.strong, @medium + other.medium, @weak + other.weak)
   end
 
-  def *(factor : Float64) : Cost
-    Cost.new(@strong * factor, @medium * factor, @weak * factor)
+  def *(other : Float64) : Cost
+    Cost.new(@strong * other, @medium * other, @weak * other)
   end
 
   def - : Cost

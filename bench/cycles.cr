@@ -8,7 +8,7 @@
 require "./bench_helper"
 
 module Cycles
-  SCENARIOS = %w(layout strong required reject suggest suggest2 suggest20)
+  SCENARIOS = %w[layout strong required reject suggest suggest2 suggest20]
 
   def self.run(scenario : String) : Nil
     solver, lefts, widths = Bench.row_layout(Bench::BOXES)

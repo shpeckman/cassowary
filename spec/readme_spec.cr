@@ -5,10 +5,10 @@ require "./spec_helper"
 private def readme_program : String
   readme = File.read(Path[__DIR__, "..", "README.md"])
   program = String.build do |io|
-    io << <<-CRYSTAL
+    io << <<-'CRYSTAL'
       def readme_check(actual, expected, line : String) : Nil
         return if actual == expected
-        STDERR.puts "README: \#{line} gave \#{actual.inspect}"
+        STDERR.puts "README: #{line} gave #{actual.inspect}"
         exit 1
       end
 

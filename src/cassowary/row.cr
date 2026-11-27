@@ -146,7 +146,7 @@ private class Cassowary::Row(T)
   # Adds *row* times *coefficient*.
   def insert(row : Row(Float64), coefficient : T, & : Sym, Bool ->) : Nil
     @constant += coefficient * row.constant
-    merge(row, coefficient, -1) { |s, entered| yield s, entered }
+    merge(row, coefficient, -1) { |symbol, entered| yield symbol, entered }
   end
 
   def remove(symbol : Sym) : Nil
@@ -186,7 +186,7 @@ private class Cassowary::Row(T)
     coefficient = @coefficients[i]
     yield symbol, false
     @constant += coefficient * row.constant
-    merge(row, coefficient, i) { |s, entered| yield s, entered }
+    merge(row, coefficient, i) { |cell, entered| yield cell, entered }
   end
 
   # Yields every symbol in exactly one of this row and *other*, with `true` when it is in
@@ -219,6 +219,9 @@ private class Cassowary::Row(T)
   #
   # Merges from the back into room reserved past the end until *row* runs out; cells
   # before that keep their place, and the merged tail moves down to follow them.
+  #
+  # Kept as one loop: it is the hottest path of every pivot.
+  # ameba:disable Metrics/CyclomaticComplexity
   private def merge(row : Row(Float64), coefficient : T, skip : Int32, & : Sym, Bool ->) : Nil
     other_symbols = row.symbols
     other_coefficients = row.coefficients

@@ -2,7 +2,7 @@
 require "./spec_helper"
 
 private def coefficients(expression : Expression) : Array({String, Float64})
-  expression.terms.map { |t| {t.variable.name, t.coefficient} }
+  expression.terms.map { |term| {term.variable.name, term.coefficient} }
 end
 
 describe Expression do

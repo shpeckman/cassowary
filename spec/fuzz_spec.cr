@@ -9,7 +9,7 @@ private def check_column_index(solver : Solver) : Nil
     basic = solver.@symbols[id]
     row.each_symbol do |symbol|
       cells += 1
-      solver.@columns[symbol.id].not_nil!.includes?(basic).should be_true
+      solver.@columns[symbol.id].try(&.includes?(basic)).should be_true
     end
   end
   solver.@columns.sum { |column| column.try(&.size) || 0 }.should eq(cells)
@@ -54,7 +54,7 @@ end
 # alone rejects it, and without any one of its constraints it is accepted.
 private def check_explained(explained : Array(Constraint), rejected : Constraint, required : Array(Constraint)) : Nil
   explained.should_not be_empty
-  explained.each { |c| required.any?(&.same?(c)).should be_true }
+  explained.each { |constraint| required.any?(&.same?(constraint)).should be_true }
   copy = ->(c : Constraint) { Constraint.new(c.expression, c.operator, c.strength) }
   expect_raises(UnsatisfiableConstraint) { Solver.new.add(explained.map(&copy) << copy.call(rejected)) }
   explained.each do |left_out|
@@ -86,7 +86,7 @@ describe "Solver fuzzing" do
         # Every required constraint holds at this point, so they stay satisfiable together.
         point = variables.map { random.rand(-100..100) * scale }
         value_at = ->(expression : Expression) do
-          expression.terms.sum(expression.constant) { |t| t.coefficient * point[variables.index!(&.same?(t.variable))] }
+          expression.terms.sum(expression.constant) { |term| term.coefficient * point[variables.index!(&.same?(term.variable))] }
         end
 
         bound = 1000 * scale
@@ -145,17 +145,17 @@ describe "Solver fuzzing" do
           variables.each { |v| solver[v].should eq(v.value) }
           listed = solver.constraints
           listed.size.should eq(required.size + optional.size)
-          (required + optional).each { |c| listed.any?(&.same?(c)).should be_true }
+          (required + optional).each { |added| listed.any?(&.same?(added)).should be_true }
           # Rounding grows with the largest coordinate, not with each constraint's own terms.
-          required.each { |c| (c.violated? && c.expression.value.abs > 1.0e-12 * bound).should be_false }
+          required.each { |held| (held.violated? && held.expression.value.abs > 1.0e-12 * bound).should be_false }
           check_column_index(solver)
           check_optimal(solver, random, required, optional, suggested, bound) if step % 25 == 24
         end
 
-        required.each { |c| solver.remove(c) }
-        optional.each { |c| solver.remove(c) }
+        required.each { |constraint| solver.remove(constraint) }
+        optional.each { |constraint| solver.remove(constraint) }
         variables.each { |v| solver.remove_edit(v) if solver.has_edit?(v) }
-        solver.@rows.all?(&.nil?).should be_true
+        solver.@rows.all?(Nil).should be_true
         solver.@columns.all? { |column| column.nil? || column.empty? }.should be_true
         solver.@objective.empty?.should be_true
         solver.@vars.should be_empty

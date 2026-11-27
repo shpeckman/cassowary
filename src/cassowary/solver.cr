@@ -435,7 +435,7 @@ class Cassowary::Solver
 
   # Removes *symbol* from the tableau and the objective, fixing it at zero, and frees it.
   private def drop_symbol(symbol : Sym) : Nil
-    take_row(symbol).try { |row| recycle(row) }
+    take_row?(symbol).try { |row| recycle(row) }
     remove_column(symbol)
     free_symbol(symbol)
   end
@@ -489,7 +489,11 @@ class Cassowary::Solver
   end
 
   # Removes and returns the row of *basic*, if it is basic.
-  private def take_row(basic : Sym) : Row(Float64)?
+  private def take_row(basic : Sym) : Row(Float64)
+    take_row?(basic) || raise InternalError.new("Symbol #{basic} is not basic")
+  end
+
+  private def take_row?(basic : Sym) : Row(Float64)?
     record(basic)
     row = @rows[basic.id] || return
     @rows[basic.id] = nil
@@ -499,7 +503,7 @@ class Cassowary::Solver
 
   # Makes *entering* basic in place of *leaving*.
   private def pivot(leaving : Sym, entering : Sym) : Nil
-    row = take_row(leaving).not_nil!
+    row = take_row(leaving)
     row.solve_for(leaving, entering)
     substitute(entering, row)
     put_row(entering, row)
@@ -643,7 +647,7 @@ class Cassowary::Solver
   # Makes *artificial_symbol* parametric so it can be dropped. Returns false if its row
   # has no restricted symbol to pivot in.
   private def pivot_out_artificial(artificial_symbol : Sym) : Bool
-    basic = take_row(artificial_symbol) || return true
+    basic = take_row?(artificial_symbol) || return true
     return true if basic.empty?
     entering = basic.find_symbol(&.restricted?) || return false
     basic.solve_for(artificial_symbol, entering)
@@ -707,7 +711,7 @@ class Cassowary::Solver
       elsif saved
         put_row(basic, saved)
       elsif current
-        take_row(basic)
+        take_row?(basic)
         recycle(current)
       end
     end
@@ -722,7 +726,7 @@ class Cassowary::Solver
   # reports, or nil when *constraint* fits.
   private def conflicts_with(constraints : Array(Constraint), constraint : Constraint) : Array(Constraint)?
     scratch = Solver.new
-    constraints.each { |c| scratch.add(c) }
+    constraints.each { |kept| scratch.add(kept) }
     scratch.add(constraint)
     nil
   rescue error : UnsatisfiableConstraint
@@ -762,12 +766,12 @@ class Cassowary::Solver
   # Eliminates *marker* from the tableau, dropping the one row that defines it.
   # Returns false if no row holds *marker*.
   private def remove_symbol(marker : Sym) : Bool
-    if row = take_row(marker)
+    if row = take_row?(marker)
       recycle(row)
       return true
     end
     leaving = marker_leaving_symbol(marker) || return false
-    row = take_row(leaving).not_nil!
+    row = take_row(leaving)
     row.solve_for(leaving, marker)
     substitute(marker, row)
     recycle(row)
@@ -780,9 +784,9 @@ class Cassowary::Solver
       basics.each do |basic|
         record(basic)
         r = row_of(basic)
-        r.substitute(symbol, row) do |s, entered|
-          next if s == symbol
-          entered ? column(s) << basic : unindex(s, basic)
+        r.substitute(symbol, row) do |cell, entered|
+          next if cell == symbol
+          entered ? column(cell) << basic : unindex(cell, basic)
         end
         @infeasible << basic if !basic.external? && r.constant < 0.0 && !negligible?(r.constant)
       end
@@ -856,7 +860,7 @@ class Cassowary::Solver
       entering = Sym::INVALID
       best = Cost::ZERO
       row.each do |symbol, coefficient|
-        next unless coefficient > 0.0 && !symbol.dummy?
+        next if coefficient <= 0.0 || symbol.dummy?
         ratio = @objective.coefficient_for(symbol) * (1.0 / coefficient)
         if entering.invalid? || ratio < best
           best = ratio

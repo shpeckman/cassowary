@@ -75,7 +75,7 @@ struct Cassowary::Expression
     if factor == 1.0
       terms.concat(@terms)
     else
-      @terms.each { |t| terms << Term.new(t.variable, t.coefficient * factor) }
+      @terms.each { |term| terms << Term.new(term.variable, term.coefficient * factor) }
     end
     @constant * factor
   end
@@ -114,7 +114,7 @@ struct Cassowary::Expression
       end
     else
       seen = Set(UInt64).new(size)
-      @terms.any? { |t| !seen.add?(t.variable.object_id) }
+      @terms.any? { |term| !seen.add?(term.variable.object_id) }
     end
   end
 end
