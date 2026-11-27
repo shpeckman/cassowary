@@ -23,6 +23,7 @@ module Cassowary
 end
 
 require "./cassowary/errors"
+require "./cassowary/cost"
 require "./cassowary/strength"
 require "./cassowary/operand"
 require "./cassowary/variable"
@@ -33,3 +34,4 @@ require "./cassowary/number"
 require "./cassowary/symbol"
 require "./cassowary/row"
 require "./cassowary/solver"
+require "./cassowary/edit"

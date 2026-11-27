@@ -4,8 +4,9 @@
 #
 # `#value` holds the result of the last `Solver#update`.
 #
-# NOTE: `==` builds a `Constraint` and `!=` does not compile, so a variable must not be
-# used as a `Hash` key or compared with `==`. Use `same?` for identity.
+# NOTE: `==` builds a `Constraint` and `!=` does not compile, so compare variables with
+# `same?`, and key a `Hash` by variables only after calling `Hash#compare_by_identity`
+# on it.
 class Cassowary::Variable
   include Operand
 

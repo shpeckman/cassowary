@@ -45,9 +45,14 @@ width.value # => 100.0
 `Variable.new(name)` creates an unknown. `Solver#update` writes the solution into
 `Variable#value`; values do not change between calls to `#update`.
 
-`==` on a variable builds a constraint, so a variable cannot be compared with `==` or
-used as a `Hash` key. `!=` does not compile, because no constraint expresses it. Use
-`same?` for identity.
+`==` on a variable builds a constraint, so a variable cannot be compared with `==`.
+`!=` does not compile, because no constraint expresses it. Use `same?` for identity, and
+call `compare_by_identity` on a `Hash` keyed by variables:
+
+```crystal
+targets = Hash(Cassowary::Variable, Float64).new.compare_by_identity
+targets[width] = 250.0
+```
 
 The solver keeps a variable only while a constraint or edit uses it, so a variable whose
 last constraint is removed is forgotten and costs nothing.
@@ -56,12 +61,12 @@ last constraint is removed is forgotten and costs nothing.
 
 `Variable`, `Term` and `Expression` include `Operand`, which provides:
 
-| Operator           | Operand            | Result       |
-|--------------------|--------------------|--------------|
-| `+`, `-`           | operand or number  | `Expression` |
-| `*`, `/`           | number             | `Expression` |
-| unary `-`          |                    | `Expression` |
-| `==`, `<=`, `>=`   | operand or number  | `Constraint` |
+| Operator         | Operand           | Result       |
+|------------------|-------------------|--------------|
+| `+`, `-`         | operand or number | `Expression` |
+| `*`, `/`         | number            | `Expression` |
+| unary `-`        |                   | `Expression` |
+| `==`, `<=`, `>=` | operand or number | `Constraint` |
 
 Numbers on the left side work too: `2 * x`, `10 - x`, `100 <= x`. Expressions must stay
 linear; a variable cannot multiply another variable.
@@ -86,50 +91,55 @@ values, which is useful after `Solver#update` to see which optional constraints 
 
 ### Strengths
 
-| Strength                           | Meaning                              |
-|------------------------------------|--------------------------------------|
-| `Strength::REQUIRED` / `:required` | must hold; the default               |
-| `Strength::STRONG` / `:strong`     |                                      |
-| `Strength::MEDIUM` / `:medium`     |                                      |
-| `Strength::WEAK` / `:weak`         |                                      |
-| `Strength.new(strong, medium, weak, weight = 1.0)` | custom strength      |
+| Strength                                           | Meaning                |
+|----------------------------------------------------|------------------------|
+| `Strength::REQUIRED` / `:required`                 | must hold; the default |
+| `Strength::STRONG` / `:strong`                     |                        |
+| `Strength::MEDIUM` / `:medium`                     |                        |
+| `Strength::WEAK` / `:weak`                         |                        |
+| `Strength.new(strong, medium, weak, weight = 1.0)` | custom strength        |
 
-Each weighted component is clamped to `0..1000`. One unit of a level outweighs up to 999
-units of the levels below it.
+Each weighted component is clamped to `0..1000`. The solver minimizes violation level by
+level: any violation of a strong component outweighs every medium and weak violation, and
+any medium violation outweighs every weak one. Within a level, violations add up,
+multiplied by the component.
 
 ### Solver
 
-| Method                              | Effect                                                    |
-|-------------------------------------|-----------------------------------------------------------|
-| `add(constraint)`                   | adds a constraint and returns it                          |
-| `remove(constraint)`                | removes a constraint                                      |
-| `has?(constraint)`                  | whether the constraint is in the solver                   |
-| `add_edit(variable, strength = :strong)` | makes a variable steerable by `suggest`              |
-| `remove_edit(variable)`             | stops a variable from being an edit variable              |
-| `has_edit?(variable)`               | whether the variable is an edit variable                  |
-| `suggest(variable, value)`          | suggests a value for an edit variable                     |
-| `update`                            | writes the solution into the variables                    |
-| `reset`                             | removes every constraint and edit variable                |
-| `dump` / `dump(io)`                 | describes the internal state, for debugging               |
+| Method                                            | Effect                                                                             |
+|---------------------------------------------------|------------------------------------------------------------------------------------|
+| `add(constraint)`                                 | adds a constraint and returns it                                                   |
+| `remove(constraint)`                              | removes a constraint                                                               |
+| `has?(constraint)`                                | whether the constraint is in the solver                                            |
+| `add_edit(variable, strength = :strong)`          | makes a variable steerable by `suggest`                                            |
+| `remove_edit(variable)`                           | stops a variable from being an edit variable                                       |
+| `has_edit?(variable)`                             | whether the variable is an edit variable                                           |
+| `edit(variable, strength = :strong) { \|edit\| }` | makes a variable an edit variable for the block; `edit.suggest(value)` steers it   |
+| `suggest(variable, value)`                        | suggests a value for an edit variable                                              |
+| `suggest(values)`                                 | suggests values for several edit variables at once, from `{variable, value}` pairs |
+| `update`                                          | writes the solution into the variables                                             |
+| `update { \|variable\| }`                         | writes the solution and yields each variable whose value changed                   |
+| `reset`                                           | removes every constraint and edit variable                                         |
+| `dump` / `dump(io)`                               | describes the internal state, for debugging                                        |
 
 ### Errors
 
 All errors inherit from `Cassowary::Error`.
 
-| Error                     | Raised by                         | When                                              |
-|---------------------------|-----------------------------------|---------------------------------------------------|
-| `DuplicateConstraint`     | `add`                             | the constraint is already in the solver           |
-| `UnsatisfiableConstraint` | `add`                             | a required constraint conflicts; solver unchanged |
-| `UnknownConstraint`       | `remove`                          | the constraint is not in the solver               |
-| `DuplicateEdit`           | `add_edit`                        | the variable is already an edit variable          |
-| `BadRequiredStrength`     | `add_edit`                        | the edit strength is required                     |
-| `UnknownEdit`             | `remove_edit`, `suggest`          | the variable is not an edit variable              |
-| `InternalError`           | any                               | a solver bug                                      |
+| Error                     | Raised by                | When                                                                                                            |
+|---------------------------|--------------------------|-----------------------------------------------------------------------------------------------------------------|
+| `DuplicateConstraint`     | `add`                    | the constraint is already in the solver                                                                         |
+| `UnsatisfiableConstraint` | `add`                    | a required constraint conflicts; solver unchanged; `conflicts` lists the required constraints it conflicts with |
+| `UnknownConstraint`       | `remove`                 | the constraint is not in the solver                                                                             |
+| `DuplicateEdit`           | `add_edit`               | the variable is already an edit variable                                                                        |
+| `BadRequiredStrength`     | `add_edit`               | the edit strength is required                                                                                   |
+| `UnknownEdit`             | `remove_edit`, `suggest` | the variable is not an edit variable; `suggest(values)` checks every variable before changing anything          |
+| `InternalError`           | any                      | a solver bug                                                                                                    |
 
 ## Development
 
 ```sh
-make spec   # run the specs
+make spec   # run the specs; FUZZ_SEEDS=200 make spec fuzzes deeper
 make bench  # run the benchmarks
 make docs   # generate the API docs
 ```
@@ -141,4 +151,4 @@ ones. On a processor with both performance and efficiency cores, pin the run to 
 
 ## License
 
-MIT
+MIT, see `LICENSE`.

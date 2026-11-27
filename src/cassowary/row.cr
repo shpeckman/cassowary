@@ -1,6 +1,7 @@
 # src/cassowary/row.cr
 
-# A tableau row: `basic = constant + Σ coefficient * symbol`.
+# A tableau row: `basic = constant + Σ coefficient * symbol`. `T` is `Float64` for the
+# tableau and `Cost` for the objective, which weighs every strength level separately.
 #
 # Cells live in two parallel buffers sorted by symbol. Adding a long row merges both
 # sorted lists into a spare pair of buffers, which then swaps with the live pair, so
@@ -10,47 +11,73 @@
 #
 # The block overloads of `#insert` and `#substitute` yield every symbol that enters
 # (`true`) or leaves (`false`) the row; the solver uses them to keep its column index.
-private class Cassowary::Row
+private class Cassowary::Row(T)
   private NEAR_ZERO = 1.0e-8
 
   # Below this ratio of row lengths, `#insert(row)` updates cells in place instead of
   # merging.
   private IN_PLACE_RATIO = 8
 
-  getter constant : Float64
+  getter constant : T
   getter size = 0
   protected getter symbols = Pointer(Sym).null
-  protected getter coefficients = Pointer(Float64).null
+  protected getter coefficients = Pointer(T).null
   @capacity = 0
   @spare_symbols = Pointer(Sym).null
-  @spare_coefficients = Pointer(Float64).null
+  @spare_coefficients = Pointer(T).null
   @spare_capacity = 0
 
-  def initialize(@constant : Float64 = 0.0)
+  def initialize(@constant : T)
   end
 
   def self.near_zero?(value : Float64) : Bool
     value.abs < NEAR_ZERO
   end
 
-  def copy : Row
-    row = Row.new(@constant)
-    row.copy_cells_from(self)
-    row
+  def self.near_zero?(value : Cost) : Bool
+    value.near_zero?
   end
 
-  protected def copy_cells_from(other : Row) : Nil
+  def self.magnitude(value : Float64) : Float64
+    value.abs
+  end
+
+  def self.magnitude(value : Cost) : Float64
+    value.magnitude
+  end
+
+  def self.negative?(value : Float64) : Bool
+    value < 0.0
+  end
+
+  def self.negative?(value : Cost) : Bool
+    value.negative?
+  end
+
+  def copy : Row(T)
+    Row(T).new(@constant).copy_from(self)
+  end
+
+  # Makes this row equal to *other*, reusing its buffers, and returns it.
+  def copy_from(other : Row(T)) : self
+    @constant = other.constant
     reserve(other.size)
     @symbols.copy_from(other.symbols, other.size)
     @coefficients.copy_from(other.coefficients, other.size)
     @size = other.size
+    self
+  end
+
+  # Removes every cell and sets the constant to *constant*.
+  def clear(@constant : T) : Nil
+    @size = 0
   end
 
   def empty? : Bool
     @size == 0
   end
 
-  def each(& : Sym, Float64 ->) : Nil
+  def each(& : Sym, T ->) : Nil
     @size.times { |i| yield @symbols[i], @coefficients[i] }
   end
 
@@ -71,28 +98,37 @@ private class Cassowary::Row
     true
   end
 
-  # Returns the largest absolute coefficient, or zero for an empty row.
+  # Returns the largest absolute coefficient component, or zero for an empty row.
   def max_magnitude : Float64
     max = 0.0
-    @size.times { |i| max = Math.max(max, @coefficients[i].abs) }
+    @size.times { |i| max = Math.max(max, Row.magnitude(@coefficients[i])) }
     max
   end
 
-  def coefficient_for(symbol : Sym) : Float64
+  def coefficient_for(symbol : Sym) : T
     i = search(symbol)
-    i >= 0 ? @coefficients[i] : 0.0
+    i >= 0 ? @coefficients[i] : @constant * 0.0
+  end
+
+  # Returns the first symbol that is not a dummy and whose increase lowers this row.
+  def entering_symbol : Sym?
+    @size.times do |i|
+      symbol = @symbols[i]
+      return symbol if !symbol.dummy? && Row.negative?(@coefficients[i])
+    end
+    nil
   end
 
   # Adds *value* to the constant and returns the new constant.
-  def add(value : Float64) : Float64
+  def add(value : T) : T
     @constant += value
   end
 
-  def insert(symbol : Sym, coefficient : Float64 = 1.0) : Nil
+  def insert(symbol : Sym, coefficient : T) : Nil
     insert(symbol, coefficient) { }
   end
 
-  def insert(symbol : Sym, coefficient : Float64, & : Sym, Bool ->) : Nil
+  def insert(symbol : Sym, coefficient : T, & : Sym, Bool ->) : Nil
     i = search(symbol)
     if i >= 0
       sum = @coefficients[i] + coefficient
@@ -108,13 +144,13 @@ private class Cassowary::Row
     end
   end
 
-  def insert(row : Row, coefficient : Float64 = 1.0) : Nil
+  def insert(row : Row(Float64), coefficient : T) : Nil
     insert(row, coefficient) { }
   end
 
   # Adds *row* times *coefficient*.
-  def insert(row : Row, coefficient : Float64, & : Sym, Bool ->) : Nil
-    @constant += row.constant * coefficient
+  def insert(row : Row(Float64), coefficient : T, & : Sym, Bool ->) : Nil
+    @constant += coefficient * row.constant
     other_size = row.size
     return if other_size == 0
 
@@ -122,7 +158,7 @@ private class Cassowary::Row
       other_symbols = row.symbols
       other_coefficients = row.coefficients
       other_size.times do |j|
-        insert(other_symbols[j], other_coefficients[j] * coefficient) { |s, entered| yield s, entered }
+        insert(other_symbols[j], coefficient * other_coefficients[j]) { |s, entered| yield s, entered }
       end
     else
       merge(row, coefficient) { |s, entered| yield s, entered }
@@ -155,12 +191,12 @@ private class Cassowary::Row
     solve_for(rhs)
   end
 
-  def substitute(symbol : Sym, row : Row) : Nil
+  def substitute(symbol : Sym, row : Row(Float64)) : Nil
     substitute(symbol, row) { }
   end
 
   # Replaces *symbol* with *row*.
-  def substitute(symbol : Sym, row : Row, & : Sym, Bool ->) : Nil
+  def substitute(symbol : Sym, row : Row(Float64), & : Sym, Bool ->) : Nil
     i = search(symbol)
     return if i < 0
     coefficient = @coefficients[i]
@@ -171,7 +207,7 @@ private class Cassowary::Row
 
   # Yields every symbol in exactly one of this row and *other*, with `true` when it is in
   # this row.
-  def each_difference(other : Row, & : Sym, Bool ->) : Nil
+  def each_difference(other : Row(T), & : Sym, Bool ->) : Nil
     other_symbols = other.symbols
     other_size = other.size
     i = j = 0
@@ -195,7 +231,7 @@ private class Cassowary::Row
   end
 
   # Merges both sorted cell lists into the spare buffers and swaps them in.
-  private def merge(row : Row, coefficient : Float64, & : Sym, Bool ->) : Nil
+  private def merge(row : Row(Float64), coefficient : T, & : Sym, Bool ->) : Nil
     other_symbols = row.symbols
     other_coefficients = row.coefficients
     other_size = row.size
@@ -218,7 +254,7 @@ private class Cassowary::Row
         i += 1
       elsif i == size || other_symbols[j].bits < @symbols[i].bits
         symbol = other_symbols[j]
-        value = other_coefficients[j] * coefficient
+        value = coefficient * other_coefficients[j]
         unless Row.near_zero?(value)
           symbols[n] = symbol
           coefficients[n] = value
@@ -228,7 +264,7 @@ private class Cassowary::Row
         j += 1
       else
         symbol = @symbols[i]
-        value = @coefficients[i] + other_coefficients[j] * coefficient
+        value = @coefficients[i] + coefficient * other_coefficients[j]
         if Row.near_zero?(value)
           yield symbol, false
         else
@@ -279,7 +315,7 @@ private class Cassowary::Row
     buffer.null? ? Pointer(T).malloc(capacity) : buffer.realloc(capacity)
   end
 
-  private def insert_at(i : Int32, symbol : Sym, coefficient : Float64) : Nil
+  private def insert_at(i : Int32, symbol : Sym, coefficient : T) : Nil
     reserve(@size + 1)
     tail = @size - i
     if tail > 0

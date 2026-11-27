@@ -196,10 +196,11 @@ describe Solver do
     boxes.each { |b| solver.add((b == 0).strength(:weak)) }
     solver.update
     before = boxes.map(&.value)
-    tableau = solver.@rows.map { |basic, row| "#{basic} = #{row}" }.sort
+    rows = -> { solver.@rows.each_with_index.compact_map { |row, id| row && "#{solver.@symbols[id]} = #{row}" }.to_a.sort }
+    tableau = rows.call
     objective = solver.@objective.to_s
     expect_raises(UnsatisfiableConstraint) { solver.add(boxes[0] >= 20) }
-    solver.@rows.map { |basic, row| "#{basic} = #{row}" }.sort.should eq(tableau)
+    rows.call.should eq(tableau)
     solver.@objective.to_s.should eq(objective)
     solver.update
     boxes.map(&.value).should eq(before)
@@ -219,5 +220,93 @@ describe Solver do
     dump.should contain("x: v1, used by 2")
     dump.should contain("  x = 7.0")
     String.build { |io| solver.dump(io) }.should eq(dump)
+  end
+
+  it "reports the required constraints a rejected constraint conflicts with" do
+    x = Variable.new("x")
+    y = Variable.new("y")
+    solver = Solver.new
+    lower = solver.add(x >= 10)
+    upper = solver.add(x <= 20)
+    other = solver.add(y >= 0)
+    solver.add((x == 15).strength(:weak))
+
+    error = expect_raises(UnsatisfiableConstraint) { solver.add(x >= 30) }
+    error.conflicts.should contain(upper)
+    error.conflicts.should_not contain(other)
+
+    error = expect_raises(UnsatisfiableConstraint) { solver.add(x == 5) }
+    error.conflicts.should contain(lower)
+    error.conflicts.should_not contain(other)
+  end
+
+  it "prefers any violation of a weaker level over one of a stronger level" do
+    x = Variable.new("x")
+    solver = Solver.new
+    solver.add((x == 10).strength(Strength.new(0, 1, 0)))
+    2.times { solver.add((x == 0).strength(Strength.new(0, 0, 1000))) }
+    solver.update
+    x.value.should eq(10.0)
+  end
+
+  it "suggests several values at once" do
+    width = Variable.new("width")
+    height = Variable.new("height")
+    solver = Solver.new
+    solver.add(width >= 0)
+    solver.add(height <= width)
+    solver.add_edit(width)
+    solver.add_edit(height, :weak)
+    solver.suggest([{width, 50}, {height, 80}])
+    solver.update
+    width.value.should eq(50.0)
+    height.value.should eq(50.0)
+
+    expect_raises(UnknownEdit) { solver.suggest([{width, 70}, {Variable.new("z"), 1}]) }
+    solver.update
+    width.value.should eq(50.0)
+  end
+
+  it "yields the variables whose value changed" do
+    x = Variable.new("x")
+    y = Variable.new("y")
+    solver = Solver.new
+    solver.add(x == 1)
+    solver.add(y == 0)
+    changed = [] of String
+    solver.update { |variable| changed << variable.name }
+    changed.should eq(["x"])
+
+    changed.clear
+    solver.update { |variable| changed << variable.name }
+    changed.should be_empty
+  end
+
+  it "removes the edit variable after an edit block" do
+    x = Variable.new("x")
+    solver = Solver.new
+    solver.add((x == 0).strength(:weak))
+    solver.edit(x) do |edit|
+      edit.variable.should be(x)
+      edit.suggest(42)
+      solver.update
+      x.value.should eq(42.0)
+    end
+    solver.has_edit?(x).should be_false
+    solver.update
+    x.value.should eq(0.0)
+
+    expect_raises(Exception, "stop") { solver.edit(x, :medium) { raise "stop" } }
+    solver.has_edit?(x).should be_false
+  end
+
+  it "reuses the ids of removed constraints and variables" do
+    solver = Solver.new
+    3.times do
+      x = Variable.new("x")
+      constraint = solver.add(x >= 1)
+      solver.remove(constraint)
+    end
+    solver.@symbols.size.should eq(3)
   end
 end

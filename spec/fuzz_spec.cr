@@ -4,14 +4,54 @@ require "./spec_helper"
 # Checks that every row's symbols are indexed under that row and nothing else is.
 private def check_column_index(solver : Solver) : Nil
   cells = 0
-  solver.@rows.each do |basic, row|
+  solver.@rows.each_with_index do |row, id|
+    next unless row
+    basic = solver.@symbols[id]
     row.each_symbol do |symbol|
       cells += 1
-      solver.@columns[symbol].includes?(basic).should be_true
+      solver.@columns[symbol.id].not_nil!.includes?(basic).should be_true
     end
   end
-  solver.@columns.sum(&.[1].size).should eq(cells)
+  solver.@columns.sum { |column| column.try(&.size) || 0 }.should eq(cells)
 end
+
+# Returns the total violation of each strength level, strong first.
+private def violation_costs(constraints : Enumerable(Constraint)) : Array(Float64)
+  costs = [0.0, 0.0, 0.0]
+  constraints.each do |constraint|
+    value = constraint.expression.value
+    error = case constraint.operator
+            in .equal?         then value.abs
+            in .less_equal?    then Math.max(value, 0.0)
+            in .greater_equal? then Math.max(-value, 0.0)
+            end
+    level = {Strength::STRONG, Strength::MEDIUM, Strength::WEAK}.index!(constraint.strength)
+    costs[level] += error
+  end
+  costs
+end
+
+# Checks that *solver* reaches the same cost per strength level as a fresh solver given
+# the same constraints in another order.
+private def check_optimal(solver : Solver, random : Random, required : Array(Constraint),
+                          optional : Array(Constraint), suggested : Hash(Variable, Float64)) : Nil
+  edits = suggested.map { |variable, value| (variable == value).strength(:strong) }
+  solver.update
+  expected = violation_costs(optional + edits)
+
+  fresh = Solver.new
+  (required + optional + edits).shuffle(random).each do |constraint|
+    fresh.add(Constraint.new(constraint.expression, constraint.operator, constraint.strength))
+  end
+  fresh.update
+  actual = violation_costs(optional + edits)
+  actual.zip(expected) { |a, e| a.should be_close(e, 1.0e-6 * (1.0 + e.abs)) }
+
+  solver.update
+end
+
+# Number of seeds to fuzz; set FUZZ_SEEDS for a deeper run.
+private FUZZ_SEEDS = (ENV["FUZZ_SEEDS"]? || "10").to_i
 
 private def random_expression(random : Random, variables : Array(Variable)) : Expression
   terms = variables.sample(random.rand(1..3), random).map do |variable|
@@ -21,8 +61,8 @@ private def random_expression(random : Random, variables : Array(Variable)) : Ex
 end
 
 describe "Solver fuzzing" do
-  10.times do |seed|
-    it "keeps required constraints satisfied (seed #{seed})" do
+  FUZZ_SEEDS.times do |seed|
+    it "keeps required constraints satisfied and the solution optimal (seed #{seed})" do
       random = Random.new(seed)
       variables = Array.new(8) { |i| Variable.new("v#{i}") }
       # Every required constraint holds at this point, so they stay satisfiable together.
@@ -34,12 +74,13 @@ describe "Solver fuzzing" do
       solver = Solver.new
       required = [] of Constraint
       optional = [] of Constraint
+      suggested = Hash(Variable, Float64).new.compare_by_identity
       variables.each do |v|
         required << solver.add(v >= -1000)
         required << solver.add(v <= 1000)
       end
 
-      300.times do
+      300.times do |step|
         case random.rand(10)
         when 0..2
           expression = random_expression(random, variables)
@@ -68,23 +109,31 @@ describe "Solver fuzzing" do
         when 8
           variable = variables.sample(random)
           solver.add_edit(variable, :strong) unless solver.has_edit?(variable)
-          solver.suggest(variable, random.rand(-1500..1500))
+          value = random.rand(-1500..1500)
+          solver.suggest(variable, value)
+          suggested[variable] = value.to_f64
         else
           variable = variables.sample(random)
-          solver.remove_edit(variable) if solver.has_edit?(variable)
+          if solver.has_edit?(variable)
+            solver.remove_edit(variable)
+            suggested.delete(variable)
+          end
         end
 
         solver.update
         required.each { |c| c.violated?.should be_false }
         check_column_index(solver)
+        check_optimal(solver, random, required, optional, suggested) if step % 25 == 24
       end
 
       required.each { |c| solver.remove(c) }
       optional.each { |c| solver.remove(c) }
       variables.each { |v| solver.remove_edit(v) if solver.has_edit?(v) }
-      solver.@rows.should be_empty
-      solver.@columns.should be_empty
+      solver.@rows.all?(&.nil?).should be_true
+      solver.@columns.all? { |column| column.nil? || column.empty? }.should be_true
+      solver.@objective.empty?.should be_true
       solver.@vars.should be_empty
+      solver.@free_ids.size.should eq(solver.@symbols.size - 1)
     end
   end
 end

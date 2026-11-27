@@ -3,11 +3,13 @@
 # The priority of a constraint.
 #
 # The solver satisfies every required constraint, then minimizes the violation of the
-# others. One unit of a level outweighs up to 999 units of the levels below it.
+# strong components, then the medium ones, then the weak ones: no amount of violation at
+# a lower level outweighs any violation at a higher level. Strengths compare the same
+# way.
 #
 # ```
-# Strength::STRONG > Strength.new(0, 999, 999) # => true
-# Strength.new(0, 2, 0) > Strength::MEDIUM     # => true
+# Strength::STRONG > Strength.new(0, 1000, 1000) # => true
+# Strength.new(0, 2, 0) > Strength::MEDIUM       # => true
 # ```
 struct Cassowary::Strength
   include Comparable(Strength)
@@ -33,15 +35,18 @@ struct Cassowary::Strength
   private LEVEL_MAX = 1000.0
 
   getter value : Float64
+  protected getter cost : Cost
 
   # Creates a strength from its *strong*, *medium* and *weak* components, each multiplied by *weight*.
   #
   # Each weighted component is clamped to `0..1000`.
   def initialize(strong : Number, medium : Number, weak : Number, weight : Number = 1.0)
     w = weight.to_f64
-    @value = (strong.to_f64 * w).clamp(0.0, LEVEL_MAX) * 1_000_000.0 +
-             (medium.to_f64 * w).clamp(0.0, LEVEL_MAX) * 1_000.0 +
-             (weak.to_f64 * w).clamp(0.0, LEVEL_MAX)
+    @cost = Cost.new(
+      (strong.to_f64 * w).clamp(0.0, LEVEL_MAX),
+      (medium.to_f64 * w).clamp(0.0, LEVEL_MAX),
+      (weak.to_f64 * w).clamp(0.0, LEVEL_MAX))
+    @value = @cost.strong * 1_000_000.0 + @cost.medium * 1_000.0 + @cost.weak
   end
 
   # A constraint the solver must satisfy.
@@ -55,7 +60,7 @@ struct Cassowary::Strength
   end
 
   def <=>(other : Strength) : Int32
-    @value <=> other.value || 0
+    {@cost.strong, @cost.medium, @cost.weak} <=> {other.cost.strong, other.cost.medium, other.cost.weak} || 0
   end
 
   def to_s(io : IO) : Nil
