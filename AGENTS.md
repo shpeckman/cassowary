@@ -56,6 +56,8 @@ Port of kiwi (C++), the Badros/Borning/Stuckey Cassowary with the dual simplex f
 
 ## Code standards
 
+- Declare types with their full path (`class Cassowary::Variable`), not nested in
+  `module Cassowary`; only `src/cassowary.cr` opens the module itself.
 - Compiler-friendly, performance-focused, idiomatic Crystal; data-driven design.
 - Ergonomic user-facing API; avoid shotgun surgery (operators live once in `Operand`).
 - Visibility: `private` for types/constants/methods used only inside their namespace;

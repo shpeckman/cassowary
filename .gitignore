@@ -8,3 +8,4 @@
 *.dwarf
 shard.lock
 .cruml.yml
+AGENTS.md
