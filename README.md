@@ -46,7 +46,11 @@ width.value # => 100.0
 `Variable#value`; values do not change between calls to `#update`.
 
 `==` on a variable builds a constraint, so a variable cannot be compared with `==` or
-used as a `Hash` key. Use `same?` for identity.
+used as a `Hash` key. `!=` does not compile, because no constraint expresses it. Use
+`same?` for identity.
+
+The solver keeps a variable only while a constraint or edit uses it, so a variable whose
+last constraint is removed is forgotten and costs nothing.
 
 ### Expressions
 
@@ -77,6 +81,9 @@ another strength:
 Constraints are immutable; the solver identifies them by object identity, so keep the
 returned constraint to remove it later.
 
+`Constraint#violated?` reports whether the constraint fails for the variables' current
+values, which is useful after `Solver#update` to see which optional constraints gave way.
+
 ### Strengths
 
 | Strength                           | Meaning                              |
@@ -103,6 +110,7 @@ units of the levels below it.
 | `suggest(variable, value)`          | suggests a value for an edit variable                     |
 | `update`                            | writes the solution into the variables                    |
 | `reset`                             | removes every constraint and edit variable                |
+| `dump` / `dump(io)`                 | describes the internal state, for debugging               |
 
 ### Errors
 
@@ -122,8 +130,14 @@ All errors inherit from `Cassowary::Error`.
 
 ```sh
 make spec   # run the specs
+make bench  # run the benchmarks
 make docs   # generate the API docs
 ```
+
+The benchmarks measure expression building and solver operations: adding a layout,
+suggesting edit values, adding and removing constraints, and rejecting unsatisfiable
+ones. On a processor with both performance and efficiency cores, pin the run to one core
+(`taskset -c 2 ./bench-suite`) so the scheduler does not move it mid-measurement.
 
 ## License
 

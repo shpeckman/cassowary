@@ -4,6 +4,9 @@
 struct Cassowary::Expression
   include Operand
 
+  # Above this many terms, `#reduce` detects repeated variables with a set.
+  private LINEAR_SCAN_LIMIT = 16
+
   getter terms : Array(Term)
   getter constant : Float64
 
@@ -35,32 +38,54 @@ struct Cassowary::Expression
     io << @constant
   end
 
-  protected def concat(other : Expression) : Expression
-    Expression.new(@terms + other.terms, @constant + other.constant)
+  protected def term_count : Int32
+    @terms.size
   end
 
+  protected def append_terms(terms : Array(Term), factor : Float64) : Float64
+    if factor == 1.0
+      terms.concat(@terms)
+    else
+      @terms.each { |t| terms << Term.new(t.variable, t.coefficient * factor) }
+    end
+    @constant * factor
+  end
+
+  # Returns this expression with *amount* added to the constant, sharing the terms.
   protected def offset(amount : Float64) : Expression
     Expression.new(@terms, @constant + amount)
   end
 
-  protected def scale(factor : Float64) : Expression
-    Expression.new(@terms.map { |t| Term.new(t.variable, t.coefficient * factor) }, @constant * factor)
-  end
-
   # Merges terms that share a variable, keeping the order of first appearance.
+  # Returns `self` when no variable repeats.
   protected def reduce : Expression
-    return self if @terms.size < 2
-    index = Hash(UInt64, Int32).new
+    return self unless repeats_variable?
     merged = Array(Term).new(@terms.size)
+    positions = Hash(UInt64, Int32).new if @terms.size > LINEAR_SCAN_LIMIT
     @terms.each do |term|
-      key = term.variable.object_id
-      if i = index[key]?
-        merged[i] = Term.new(term.variable, merged[i].coefficient + term.coefficient)
+      variable = term.variable
+      i = positions ? positions[variable.object_id]? : merged.index(&.variable.same?(variable))
+      if i
+        merged[i] = Term.new(variable, merged.unsafe_fetch(i).coefficient + term.coefficient)
       else
-        index[key] = merged.size
+        positions.try &.[]=(variable.object_id, merged.size)
         merged << term
       end
     end
     Expression.new(merged, @constant)
+  end
+
+  private def repeats_variable? : Bool
+    size = @terms.size
+    return false if size < 2
+    if size <= LINEAR_SCAN_LIMIT
+      (1...size).any? do |i|
+        variable = @terms.unsafe_fetch(i).variable
+        (0...i).any? { |j| @terms.unsafe_fetch(j).variable.same?(variable) }
+      end
+    else
+      seen = Set(UInt64).new(size)
+      @terms.any? { |t| !seen.add?(t.variable.object_id) }
+    end
   end
 end

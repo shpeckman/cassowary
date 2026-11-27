@@ -169,3 +169,55 @@ describe Solver do
     boxes.last[1].value.should eq(295.0)
   end
 end
+
+describe Solver do
+  it "forgets variables once no constraint uses them" do
+    x = Variable.new("x")
+    y = Variable.new("y")
+    solver = Solver.new
+    both = solver.add(x + y == 10)
+    only_x = solver.add(x >= 2)
+    solver.add_edit(y, :weak)
+    solver.@vars.size.should eq(2)
+    solver.remove(both)
+    solver.@vars.size.should eq(2)
+    solver.remove_edit(y)
+    solver.@vars.size.should eq(1)
+    solver.remove(only_x)
+    solver.@vars.should be_empty
+  end
+
+  it "restores the tableau after rejecting a constraint" do
+    boxes = Array.new(10) { Variable.new }
+    solver = Solver.new
+    solver.add(boxes[0] >= 0)
+    boxes.each_cons_pair { |a, b| solver.add(b >= a + 10) }
+    solver.add(boxes[-1] <= 100)
+    boxes.each { |b| solver.add((b == 0).strength(:weak)) }
+    solver.update
+    before = boxes.map(&.value)
+    tableau = solver.@rows.map { |basic, row| "#{basic} = #{row}" }.sort
+    objective = solver.@objective.to_s
+    expect_raises(UnsatisfiableConstraint) { solver.add(boxes[0] >= 20) }
+    solver.@rows.map { |basic, row| "#{basic} = #{row}" }.sort.should eq(tableau)
+    solver.@objective.to_s.should eq(objective)
+    solver.update
+    boxes.map(&.value).should eq(before)
+    solver.add(boxes[0] >= 5)
+    solver.update
+    boxes[-1].value.should eq(95.0)
+  end
+
+  it "dumps its state" do
+    x = Variable.new("x")
+    solver = Solver.new
+    solver.add(x >= 3)
+    solver.add_edit(x, :weak)
+    solver.suggest(x, 7)
+    dump = solver.dump
+    dump.should contain("Tableau")
+    dump.should contain("x: v1, used by 2")
+    dump.should contain("  x = 7.0")
+    String.build { |io| solver.dump(io) }.should eq(dump)
+  end
+end

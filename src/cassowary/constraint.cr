@@ -32,6 +32,18 @@ class Cassowary::Constraint
     Constraint.new(@expression, @operator, strength)
   end
 
+  # Returns whether the variables' current values break this constraint, regardless of
+  # its strength.
+  def violated? : Bool
+    value = @expression.value
+    return false if Row.near_zero?(value)
+    case @operator
+    in .less_equal?    then value > 0.0
+    in .greater_equal? then value < 0.0
+    in .equal?         then true
+    end
+  end
+
   def to_s(io : IO) : Nil
     @expression.to_s(io)
     io << case @operator

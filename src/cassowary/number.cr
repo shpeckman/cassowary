@@ -21,6 +21,11 @@ abstract struct Number
     other == self
   end
 
+  # Fails to compile: an inequation is not a linear constraint. See `Cassowary::Operand#!=`.
+  def !=(other : Cassowary::Operand) : NoReturn
+    {% raise "Number#!= cannot build a constraint with a Cassowary::Operand" %}
+  end
+
   # Returns a required constraint that this number is at most *other*.
   def <=(other : Cassowary::Operand) : Cassowary::Constraint
     other >= self

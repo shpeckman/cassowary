@@ -21,6 +21,15 @@ struct Cassowary::Term
     Expression.new([self])
   end
 
+  protected def term_count : Int32
+    1
+  end
+
+  protected def append_terms(terms : Array(Term), factor : Float64) : Float64
+    terms << (factor == 1.0 ? self : Term.new(@variable, @coefficient * factor))
+    0.0
+  end
+
   def to_s(io : IO) : Nil
     io << @coefficient << " * " << @variable.name
   end

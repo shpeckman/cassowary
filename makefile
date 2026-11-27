@@ -1,6 +1,6 @@
 # makefile
 
-.PHONY: all help spec docs
+.PHONY: all help spec bench docs
 
 all: help
 
@@ -9,6 +9,13 @@ help:               ## Show this help
 
 spec:               ## Run spec suite
 	crystal spec
+
+bench:              ## Run bench suite
+	crystal clear_cache
+	@rm -f bench-suite
+	crystal build --verbose --release --no-debug bench/all.cr -o bench-suite
+	./bench-suite
+	@rm -f bench-suite
 
 docs:               ## Generate API docs into docs/
 	crystal docs

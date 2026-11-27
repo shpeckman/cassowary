@@ -12,14 +12,22 @@
 # x + 10 <= y        # => Constraint
 # ```
 #
-# NOTE: `==` builds a constraint, so it does not test equality. Use `same?` to compare variables.
+# NOTE: `==` builds a constraint, so it does not test equality, and `!=` does not compile.
+# Use `same?` to compare variables.
 module Cassowary::Operand
   # Returns this operand as an expression.
   abstract def to_expression : Expression
 
+  # Returns the number of terms this operand contributes to an expression.
+  protected abstract def term_count : Int32
+
+  # Appends the terms of this operand times *factor* to *terms* and returns its
+  # constant times *factor*.
+  protected abstract def append_terms(terms : Array(Term), factor : Float64) : Float64
+
   # Returns the sum of this operand and *other*.
   def +(other : Operand) : Expression
-    to_expression.concat(other.to_expression)
+    combine(other, 1.0)
   end
 
   # :ditto:
@@ -29,7 +37,7 @@ module Cassowary::Operand
 
   # Returns the difference of this operand and *other*.
   def -(other : Operand) : Expression
-    to_expression.concat(other.to_expression.scale(-1.0))
+    combine(other, -1.0)
   end
 
   # :ditto:
@@ -39,22 +47,28 @@ module Cassowary::Operand
 
   # Returns the negation of this operand.
   def - : Expression
-    to_expression.scale(-1.0)
+    scaled(-1.0)
   end
 
   # Returns this operand multiplied by *factor*.
   def *(factor : Number) : Expression
-    to_expression.scale(factor.to_f64)
+    scaled(factor.to_f64)
   end
 
   # Returns this operand divided by *divisor*.
   def /(divisor : Number) : Expression
-    to_expression.scale(1.0 / divisor.to_f64)
+    scaled(1.0 / divisor.to_f64)
   end
 
   # Returns a required constraint that this operand equals *other*.
   def ==(other : Operand | Number) : Constraint
     Constraint.new(self - other, :equal)
+  end
+
+  # Fails to compile: an inequation is not a linear constraint, and `!=` would otherwise
+  # negate a `Constraint` into `false`. Use `same?` to compare variables.
+  def !=(other : Operand | Number) : NoReturn
+    {% raise "Cassowary::Operand#!= cannot build a constraint; use `same?` to compare variables" %}
   end
 
   # Returns a required constraint that this operand is at most *other*.
@@ -65,5 +79,18 @@ module Cassowary::Operand
   # Returns a required constraint that this operand is at least *other*.
   def >=(other : Operand | Number) : Constraint
     Constraint.new(self - other, :greater_equal)
+  end
+
+  private def combine(other : Operand, factor : Float64) : Expression
+    terms = Array(Term).new(term_count + other.term_count)
+    constant = append_terms(terms, 1.0)
+    constant += other.append_terms(terms, factor)
+    Expression.new(terms, constant)
+  end
+
+  private def scaled(factor : Float64) : Expression
+    terms = Array(Term).new(term_count)
+    constant = append_terms(terms, factor)
+    Expression.new(terms, constant)
   end
 end
