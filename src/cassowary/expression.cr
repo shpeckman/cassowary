@@ -29,13 +29,42 @@ struct Cassowary::Expression
     self
   end
 
+  # Writes the expression in readable form, such as `x + 2 * y - 10`.
   def to_s(io : IO) : Nil
     @terms.each_with_index do |term, i|
-      io << " + " if i > 0
-      term.to_s(io)
+      Expression.write_term(io, term.coefficient, term.variable, i == 0)
     end
-    io << " + " unless @terms.empty?
-    io << @constant
+    if @terms.empty?
+      Expression.write_number(io, @constant)
+    elsif @constant != 0.0
+      io << (@constant < 0.0 ? " - " : " + ")
+      Expression.write_number(io, @constant.abs)
+    end
+  end
+
+  # Writes *number* without a fractional part when it is integral.
+  protected def self.write_number(io : IO, number : Float64) : Nil
+    if number == number.trunc && number.abs < 1.0e15
+      io << number.to_i64
+    else
+      io << number
+    end
+  end
+
+  # Writes *coefficient* times *variable* as `x`, `-x` or `2 * x`, joined to a
+  # preceding term by ` + ` or ` - ` unless it is the *first*.
+  protected def self.write_term(io : IO, coefficient : Float64, variable : Variable, first : Bool) : Nil
+    if first
+      io << '-' if coefficient < 0.0
+    else
+      io << (coefficient < 0.0 ? " - " : " + ")
+    end
+    magnitude = coefficient.abs
+    unless magnitude == 1.0
+      write_number(io, magnitude)
+      io << " * "
+    end
+    io << variable.name
   end
 
   protected def term_count : Int32

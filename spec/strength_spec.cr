@@ -14,9 +14,16 @@ describe Strength do
   end
 
   it "applies the weight and clamps each component" do
-    Strength.new(0, 1, 0, 2).value.should eq(2000.0)
-    Strength.new(5000, 0, 0).value.should eq(1_000_000_000.0)
-    Strength.new(-1, 0, 0).value.should eq(0.0)
+    Strength.new(0, 1, 0, 2).medium.should eq(2.0)
+    Strength.new(5000, 0, 0).strong.should eq(1000.0)
+    Strength.new(-1, 0, 0).strong.should eq(0.0)
+  end
+
+  it "names presets and lists custom components" do
+    Strength::REQUIRED.to_s.should eq("required")
+    Strength::STRONG.to_s.should eq("strong")
+    Strength::WEAK.to_s.should eq("weak")
+    Strength.new(0, 5, 0.5).to_s.should eq("Strength(0, 5, 0.5)")
   end
 
   it "reports required" do

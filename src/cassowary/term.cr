@@ -30,7 +30,8 @@ struct Cassowary::Term
     0.0
   end
 
+  # Writes the term in readable form, such as `2 * x` or `-x`.
   def to_s(io : IO) : Nil
-    io << @coefficient << " * " << @variable.name
+    Expression.write_term(io, @coefficient, @variable, true)
   end
 end

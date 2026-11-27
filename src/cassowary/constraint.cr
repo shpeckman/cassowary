@@ -50,13 +50,38 @@ class Cassowary::Constraint
     end
   end
 
+  # Writes the constraint in readable form, such as `x + 10 <= y | strong`: positive
+  # terms on the left, negative ones on the right, and the strength unless required.
   def to_s(io : IO) : Nil
-    @expression.to_s(io)
+    write_side(io, 1.0)
     io << case @operator
-    in .less_equal?    then " <= 0"
-    in .greater_equal? then " >= 0"
-    in .equal?         then " == 0"
+    in .less_equal?    then " <= "
+    in .greater_equal? then " >= "
+    in .equal?         then " == "
     end
-    io << " | " << @strength
+    write_side(io, -1.0)
+    io << " | " << @strength unless @strength.required?
+  end
+
+  def inspect(io : IO) : Nil
+    io << "Constraint(" << self << ')'
+  end
+
+  # Writes the terms and constant whose sign times *sign* is positive, or `0`.
+  private def write_side(io : IO, sign : Float64) : Nil
+    first = true
+    @expression.terms.each do |term|
+      coefficient = term.coefficient * sign
+      next unless coefficient > 0.0
+      Expression.write_term(io, coefficient, term.variable, first)
+      first = false
+    end
+    constant = @expression.constant * sign
+    if constant > 0.0
+      io << " + " unless first
+      Expression.write_number(io, constant)
+    elsif first
+      io << '0'
+    end
   end
 end

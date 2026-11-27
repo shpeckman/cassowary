@@ -1,6 +1,6 @@
 # makefile
 
-.PHONY: all help spec bench docs
+.PHONY: all help spec bench bench-cycles docs
 
 all: help
 
@@ -16,6 +16,12 @@ bench:              ## Run bench suite
 	crystal build --verbose --release --no-debug bench/all.cr -o bench-suite
 	./bench-suite
 	@rm -f bench-suite
+
+bench-cycles:       ## Count CPU cycles per bench scenario with perf
+	@rm -f bench-cycles
+	crystal build --release --no-debug bench/cycles.cr -o bench-cycles
+	bench/cycles.sh
+	@rm -f bench-cycles
 
 docs:               ## Generate API docs into docs/
 	crystal docs

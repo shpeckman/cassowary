@@ -355,4 +355,30 @@ describe Solver do
     solver.update
     x.value.should eq(20.0)
   end
+
+  it "adds and removes several constraints at once" do
+    x = Variable.new("x")
+    y = Variable.new("y")
+    solver = Solver.new
+    low = x >= 10
+    link = y == x + 5
+    solver.add(low, link)
+    solver.update
+    y.value.should eq(15.0)
+    solver.remove([low, link])
+    solver.has?(low).should be_false
+    solver.has?(link).should be_false
+  end
+
+  it "undoes a batch that fails" do
+    x = Variable.new("x")
+    solver = Solver.new
+    cap = solver.add(x <= 10)
+    low = x >= 0
+    expect_raises(UnsatisfiableConstraint) { solver.add([low, x >= 20]) }
+    solver.has?(low).should be_false
+    solver.has?(cap).should be_true
+    expect_raises(UnknownConstraint) { solver.remove(cap, low) }
+    solver.has?(cap).should be_true
+  end
 end

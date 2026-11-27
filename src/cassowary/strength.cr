@@ -34,7 +34,6 @@ struct Cassowary::Strength
 
   private LEVEL_MAX = 1000.0
 
-  getter value : Float64
   protected getter cost : Cost
 
   # Creates a strength from its *strong*, *medium* and *weak* components, each multiplied by *weight*.
@@ -46,7 +45,6 @@ struct Cassowary::Strength
       (strong.to_f64 * w).clamp(0.0, LEVEL_MAX),
       (medium.to_f64 * w).clamp(0.0, LEVEL_MAX),
       (weak.to_f64 * w).clamp(0.0, LEVEL_MAX))
-    @value = @cost.strong * 1_000_000.0 + @cost.medium * 1_000.0 + @cost.weak
   end
 
   # A constraint the solver must satisfy.
@@ -55,15 +53,51 @@ struct Cassowary::Strength
   MEDIUM   = new(0, 1, 0)
   WEAK     = new(0, 0, 1)
 
+  # Returns the weighted, clamped strong component.
+  def strong : Float64
+    @cost.strong
+  end
+
+  # Returns the weighted, clamped medium component.
+  def medium : Float64
+    @cost.medium
+  end
+
+  # Returns the weighted, clamped weak component.
+  def weak : Float64
+    @cost.weak
+  end
+
   def required? : Bool
-    @value >= REQUIRED.value
+    @cost.strong >= LEVEL_MAX && @cost.medium >= LEVEL_MAX && @cost.weak >= LEVEL_MAX
   end
 
   def <=>(other : Strength) : Int32
     {@cost.strong, @cost.medium, @cost.weak} <=> {other.cost.strong, other.cost.medium, other.cost.weak} || 0
   end
 
+  # Writes the preset name (`strong`) or the components (`Strength(0, 5, 0)`).
   def to_s(io : IO) : Nil
-    io << @value
+    if required?
+      io << "required"
+    elsif self == STRONG
+      io << "strong"
+    elsif self == MEDIUM
+      io << "medium"
+    elsif self == WEAK
+      io << "weak"
+    else
+      io << "Strength("
+      Expression.write_number(io, @cost.strong)
+      io << ", "
+      Expression.write_number(io, @cost.medium)
+      io << ", "
+      Expression.write_number(io, @cost.weak)
+      io << ')'
+    end
+  end
+
+  def inspect(io : IO) : Nil
+    to_s(io)
   end
 end

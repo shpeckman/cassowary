@@ -2,7 +2,8 @@
 
 # An unknown the solver assigns a value to.
 #
-# `#value` holds the result of the last `Solver#update`.
+# `#value` holds the result of the last `Solver#update`. Use each variable in one solver
+# only, since every solver writes its solution into `#value`.
 #
 # NOTE: `==` builds a `Constraint` and `!=` does not compile, so compare variables with
 # `same?`, and key a `Hash` by variables only after calling `Hash#compare_by_identity`

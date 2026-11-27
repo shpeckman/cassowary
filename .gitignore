@@ -10,3 +10,4 @@ shard.lock
 .cruml.yml
 AGENTS.md
 bench-suite
+bench-cycles

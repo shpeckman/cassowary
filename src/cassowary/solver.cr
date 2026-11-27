@@ -135,6 +135,25 @@ class Cassowary::Solver
     constraint
   end
 
+  # Adds every constraint of *constraints*, in order.
+  #
+  # Raises like `#add`; the constraints added before the failing one are removed again,
+  # so a failure leaves the solver's constraints unchanged.
+  def add(constraints : Enumerable(Constraint)) : Nil
+    added = [] of Constraint
+    begin
+      constraints.each { |constraint| added << add(constraint) }
+    rescue error : Error
+      added.reverse_each { |constraint| remove(constraint) }
+      raise error
+    end
+  end
+
+  # :ditto:
+  def add(first : Constraint, *rest : Constraint) : Nil
+    add(rest.to_a.unshift(first))
+  end
+
   # Removes *constraint* from the solver.
   #
   # Raises `UnknownConstraint` if the constraint is not in the solver.
@@ -148,6 +167,21 @@ class Cassowary::Solver
     drop_symbol(tag.other) unless tag.other.invalid?
     each_variable(constraint) { |variable| release(variable) }
     @dirty = true
+  end
+
+  # Removes every constraint of *constraints*.
+  #
+  # Raises `UnknownConstraint` before removing anything if one of them is not in the
+  # solver.
+  def remove(constraints : Enumerable(Constraint)) : Nil
+    unique = constraints.to_a.uniq
+    unique.each { |constraint| raise UnknownConstraint.new(constraint) unless has?(constraint) }
+    unique.each { |constraint| remove(constraint) }
+  end
+
+  # :ditto:
+  def remove(first : Constraint, *rest : Constraint) : Nil
+    remove(rest.to_a.unshift(first))
   end
 
   # Returns a minimal set of required constraints in the solver that *constraint*

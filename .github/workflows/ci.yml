@@ -27,7 +27,7 @@ jobs:
           crystal: ${{ matrix.crystal }}
 
       - name: Check formatting
-        run: crystal tool format --check src spec bench
+        run: crystal tool format --check src spec bench examples
 
       - name: Run specs
         run: crystal spec
@@ -36,6 +36,9 @@ jobs:
         run: crystal spec spec/fuzz_spec.cr
         env:
           FUZZ_SEEDS: "200"
+
+      - name: Run example
+        run: crystal run examples/layout.cr
 
       - name: Build docs
         run: crystal docs

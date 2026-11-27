@@ -34,7 +34,7 @@ describe Constraint do
     weak = c.strength(:weak)
     weak.strength.should eq(Strength::WEAK)
     c.strength.should eq(Strength::REQUIRED)
-    weak.strength(Strength.new(0, 2, 0)).strength.value.should eq(2000.0)
+    weak.strength(Strength.new(0, 2, 0)).strength.medium.should eq(2.0)
   end
 
   it "reports violations of the current values" do
@@ -60,5 +60,17 @@ describe Constraint do
       status.success?.should be_false
       error.to_s.should contain("cannot build a constraint")
     end
+  end
+
+  it "writes a readable form" do
+    x = Variable.new("x")
+    y = Variable.new("y")
+    (x + 10 <= y).to_s.should eq("x + 10 <= y")
+    (x >= 10).to_s.should eq("x >= 10")
+    (2 * x == y / 2 - 3).strength(:strong).to_s.should eq("2 * x + 3 == 0.5 * y | strong")
+    (x - x == 1).to_s.should eq("0 == 1")
+    (x - y * 2 - 4).to_s.should eq("x - 2 * y - 4")
+    (-x).to_s.should eq("-x")
+    Expression.new(5).to_s.should eq("5")
   end
 end
